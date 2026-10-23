@@ -1,0 +1,264 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+enum OrderStatus {
+  PENDING
+  CONFIRMED
+  PACKED
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum RewardType {
+  PERCENT_OFF
+  FLAT_OFF
+  FREE_DELIVERY
+}
+
+enum UserRewardStatus {
+  UNLOCKED
+  REDEEMED
+  EXPIRED
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  fullName     String   @db.VarChar(120)
+  email        String   @unique @db.VarChar(191)
+  passwordHash String   @db.VarChar(255)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  cart         Cart?
+  preference   UserPreference?
+  orders       Order[]
+  couponUsages CouponUsage[]
+  rewards      UserReward[]
+  resetTokens  PasswordResetToken[]
+
+  @@map("users")
+}
+
+model Category {
+  id          Int     @id @default(autoincrement())
+  name        String  @unique @db.VarChar(100)
+  description String? @db.VarChar(500)
+
+  products    Product[]
+  coupons     Coupon[]
+  preferences UserPreference[]
+
+  @@map("categories")
+}
+
+model Product {
+  id            Int      @id @default(autoincrement())
+  sku           String   @unique @db.VarChar(50)
+  name          String   @db.VarChar(200)
+  description   String   @db.Text
+  categoryId    Int
+  brand         String   @db.VarChar(100)
+  price         Decimal  @db.Decimal(10, 2)
+  originalPrice Decimal? @db.Decimal(10, 2)
+  imageUrl      String   @db.VarChar(500)
+  rating        Decimal? @db.Decimal(2, 1)
+  stockQuantity Int      @default(0)
+  isAvailable   Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  category   Category    @relation(fields: [categoryId], references: [id])
+  cartItems  CartItem[]
+  orderItems OrderItem[]
+
+  @@index([categoryId])
+  @@index([brand])
+  @@index([name])
+  @@map("products")
+}
+
+model Cart {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items CartItem[]
+
+  @@map("carts")
+}
+
+model CartItem {
+  id        Int @id @default(autoincrement())
+  cartId    Int
+  productId Int
+  quantity  Int @default(1)
+
+  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, productId])
+  @@index([productId])
+  @@map("cart_items")
+}
+
+model Coupon {
+  id                 Int          @id @default(autoincrement())
+  code               String       @unique @db.VarChar(40)
+  description        String?      @db.VarChar(255)
+  discountType       DiscountType
+  discountValue      Decimal      @db.Decimal(10, 2)
+  minPurchase        Decimal      @default(0) @db.Decimal(10, 2)
+  maxDiscount        Decimal?     @db.Decimal(10, 2)
+  startsAt           DateTime
+  expiresAt          DateTime
+  usageLimit         Int?
+  perUserLimit       Int?
+  usedCount          Int          @default(0)
+  eligibleCategoryId Int?
+  firstOrderOnly     Boolean      @default(false)
+  isActive           Boolean      @default(true)
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+
+  eligibleCategory Category?     @relation(fields: [eligibleCategoryId], references: [id])
+  usages           CouponUsage[]
+
+  @@index([isActive, expiresAt])
+  @@index([eligibleCategoryId])
+  @@map("coupons")
+}
+
+model CouponUsage {
+  id       Int      @id @default(autoincrement())
+  couponId Int
+  userId   Int
+  orderId  Int?     @unique
+  usedAt   DateTime @default(now())
+
+  coupon Coupon @relation(fields: [couponId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
+  order  Order? @relation(fields: [orderId], references: [id])
+
+  @@index([couponId, userId])
+  @@map("coupon_usages")
+}
+
+model RewardRule {
+  id          Int        @id @default(autoincrement())
+  code        String     @unique @db.VarChar(40)
+  minSpend    Decimal    @db.Decimal(10, 2)
+  rewardType  RewardType
+  rewardValue Decimal    @default(0) @db.Decimal(10, 2)
+  description String?    @db.VarChar(255)
+  isActive    Boolean    @default(true)
+
+  userRewards UserReward[]
+
+  @@index([isActive, minSpend])
+  @@map("reward_rules")
+}
+
+model UserReward {
+  id           Int              @id @default(autoincrement())
+  userId       Int
+  rewardRuleId Int
+  status       UserRewardStatus @default(UNLOCKED)
+  unlockedAt   DateTime         @default(now())
+  redeemedAt   DateTime?
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rewardRule RewardRule @relation(fields: [rewardRuleId], references: [id])
+
+  @@index([userId, status])
+  @@map("user_rewards")
+}
+
+model UserPreference {
+  id                 Int      @id @default(autoincrement())
+  userId             Int      @unique
+  shoppingPreference String?  @db.VarChar(100)
+  budgetPreference   Decimal? @db.Decimal(10, 2)
+  updatedAt          DateTime @updatedAt
+
+  user               User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  selectedCategories Category[]
+
+  @@map("user_preferences")
+}
+
+model Order {
+  id              Int         @id @default(autoincrement())
+  orderNumber     String      @unique @db.VarChar(30)
+  userId          Int
+  status          OrderStatus @default(PENDING)
+  subtotal        Decimal     @db.Decimal(10, 2)
+  productDiscount Decimal     @default(0) @db.Decimal(10, 2)
+  couponDiscount  Decimal     @default(0) @db.Decimal(10, 2)
+  rewardDiscount  Decimal     @default(0) @db.Decimal(10, 2)
+  deliveryCharge  Decimal     @default(0) @db.Decimal(10, 2)
+  finalAmount     Decimal     @db.Decimal(10, 2)
+  couponCode      String?     @db.VarChar(40)
+
+  deliveryName    String @db.VarChar(120)
+  deliveryPhone   String @db.VarChar(20)
+  deliveryAddress String @db.Text
+  deliveryCity    String @db.VarChar(100)
+  deliveryState   String @db.VarChar(100)
+  deliveryPincode String @db.VarChar(10)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user        User         @relation(fields: [userId], references: [id])
+  items       OrderItem[]
+  couponUsage CouponUsage?
+
+  @@index([userId, createdAt])
+  @@index([status])
+  @@map("orders")
+}
+
+model OrderItem {
+  id          Int     @id @default(autoincrement())
+  orderId     Int
+  productId   Int
+  productName String  @db.VarChar(200)
+  unitPrice   Decimal @db.Decimal(10, 2)
+  quantity    Int
+  lineTotal   Decimal @db.Decimal(10, 2)
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model PasswordResetToken {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  tokenHash String    @unique @db.VarChar(128)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
